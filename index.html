@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Closed Captions & Audio Recorder</title>
+  <title>Live Captions, Audio Recorder & Transcript</title>
   <style>
     :root {
       --bg-color: #0f172a;
@@ -14,6 +14,8 @@
       --accent-hover: #1d4ed8;
       --success: #10b981;
       --success-hover: #059669;
+      --info: #0284c7;
+      --info-hover: #0369a1;
     }
 
     body {
@@ -79,13 +81,25 @@
       transform: none;
     }
 
-    .btn-download {
-      background-color: var(--success);
-      margin-top: 12px;
+    .download-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 15px;
     }
 
-    .btn-download:hover {
+    .btn-audio {
+      background-color: var(--success);
+    }
+    .btn-audio:hover {
       background-color: var(--success-hover);
+    }
+
+    .btn-text {
+      background-color: var(--info);
+    }
+    .btn-text:hover {
+      background-color: var(--info-hover);
     }
 
     .status-box {
@@ -102,28 +116,35 @@
 <body>
 
   <div class="container">
-    <h1>Live Captions & Recorder</h1>
-    <p>Launch an always-on-top caption window while automatically recording audio.</p>
+    <h1>Live Captions & Suite</h1>
+    <p>Launch an always-on-top caption overlay while capturing full audio and text transcriptions.</p>
 
     <button id="launchBtn" class="btn">Launch Overlay & Record</button>
-    <a id="downloadBtn" class="btn btn-download" style="display: none;" download="caption-recording.webm">Download Recording (.webm)</a>
+
+    <div id="downloadGroup" class="download-group" style="display: none;">
+      <a id="downloadAudioBtn" class="btn btn-audio" download="session-audio.webm">Download Audio (.webm)</a>
+      <a id="downloadTextBtn" class="btn btn-text" download="session-transcript.txt">Download Transcript (.txt)</a>
+    </div>
 
     <div id="statusBox" class="status-box">Ready to start.</div>
   </div>
 
   <script>
     const launchBtn = document.getElementById('launchBtn');
-    const downloadBtn = document.getElementById('downloadBtn');
+    const downloadGroup = document.getElementById('downloadGroup');
+    const downloadAudioBtn = document.getElementById('downloadAudioBtn');
+    const downloadTextBtn = document.getElementById('downloadTextBtn');
     const statusBox = document.getElementById('statusBox');
 
     let recognition = null;
     let pipWindow = null;
     let isPipActive = false;
 
-    // Recording variables
+    // Recording and Transcript Storage
     let mediaRecorder = null;
     let audioChunks = [];
     let audioStream = null;
+    let fullTranscript = '';
 
     window.addEventListener('DOMContentLoaded', () => {
       const hasPiP = 'documentPictureInPicture' in window;
@@ -145,9 +166,10 @@
       try {
         statusBox.style.color = '#94a3b8';
         statusBox.textContent = 'Requesting microphone & opening window...';
-        downloadBtn.style.display = 'none';
+        downloadGroup.style.display = 'none';
+        fullTranscript = '';
 
-        // 1. Capture Microphone Audio for Recording
+        // 1. Capture Microphone Audio
         audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         audioChunks = [];
         mediaRecorder = new MediaRecorder(audioStream);
@@ -159,18 +181,22 @@
         };
 
         mediaRecorder.onstop = () => {
+          // Audio Blob creation
           const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-          const audioUrl = URL.createObjectURL(audioBlob);
-          downloadBtn.href = audioUrl;
-          downloadBtn.style.display = 'block';
+          downloadAudioBtn.href = URL.createObjectURL(audioBlob);
+
+          // Text Transcript Blob creation
+          const textBlob = new Blob([fullTranscript.trim() || 'No speech recorded.'], { type: 'text/plain' });
+          downloadTextBtn.href = URL.createObjectURL(textBlob);
+
+          // Reveal download buttons
+          downloadGroup.style.display = 'flex';
           
-          // Stop track streams to turn off red recording dot in browser tab
           if (audioStream) {
             audioStream.getTracks().forEach(track => track.stop());
           }
         };
 
-        // Start audio recording
         mediaRecorder.start();
 
         // 2. Open Picture-in-Picture window
@@ -180,7 +206,7 @@
         });
 
         isPipActive = true;
-        launchBtn.textContent = 'Stop & Save Recording';
+        launchBtn.textContent = 'Stop Session & Save Files';
         launchBtn.style.backgroundColor = '#dc2626';
 
         // 3. Build PiP Overlay UI
@@ -209,7 +235,7 @@
           overflow: hidden;
           word-wrap: break-word;
         `;
-        captionBox.textContent = 'Recording & Listening...';
+        captionBox.textContent = 'Listening & Recording...';
         pipDoc.body.appendChild(captionBox);
 
         // 4. Initialize Speech Recognition
@@ -220,14 +246,18 @@
         recognition.lang = 'en-US';
 
         recognition.onresult = (event) => {
-          let transcript = '';
+          let interimTranscript = '';
           for (let i = event.resultIndex; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript;
+            const transcriptChunk = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              fullTranscript += transcriptChunk + ' ';
+            } else {
+              interimTranscript += transcriptChunk;
+            }
           }
-          if (transcript.trim()) {
-            captionBox.textContent = transcript;
-            captionBox.scrollTop = captionBox.scrollHeight;
-          }
+
+          captionBox.textContent = interimTranscript || 'Listening...';
+          captionBox.scrollTop = captionBox.scrollHeight;
         };
 
         recognition.onend = () => {
@@ -238,7 +268,7 @@
           }
         };
 
-        // Handle overlay closing
+        // Handle Session End
         pipWindow.addEventListener('pagehide', () => {
           isPipActive = false;
           
@@ -252,11 +282,11 @@
 
           launchBtn.textContent = 'Launch Overlay & Record';
           launchBtn.style.backgroundColor = '#2563eb';
-          statusBox.textContent = 'Recording saved! Click below to download.';
+          statusBox.textContent = 'Session finished! Download your audio and transcript below.';
         });
 
         recognition.start();
-        statusBox.textContent = 'Capturing captions & recording audio...';
+        statusBox.textContent = 'Live overlay, audio recording, and transcript active!';
 
       } catch (err) {
         isPipActive = false;
