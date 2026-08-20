@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Closed Captions & Audio Recorder</title>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --text-main: #f8fafc;
+      --text-sub: #94a3b8;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --success: #10b981;
+      --success-hover: #059669;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+
+    .container {
+      background-color: var(--card-bg);
+      padding: 2.5rem;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      margin-top: 0;
+      margin-bottom: 0.5rem;
+    }
+
+    p {
+      color: var(--text-sub);
+      font-size: 0.95rem;
+      line-height: 1.5;
+      margin-bottom: 1.75rem;
+    }
+
+    .btn {
+      background-color: var(--accent);
+      color: white;
+      border: none;
+      padding: 14px 28px;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      width: 100%;
+      box-sizing: border-box;
+      display: inline-block;
+      text-decoration: none;
+    }
+
+    .btn:hover {
+      background-color: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+      background-color: #475569;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-download {
+      background-color: var(--success);
+      margin-top: 12px;
+    }
+
+    .btn-download:hover {
+      background-color: var(--success-hover);
+    }
+
+    .status-box {
+      margin-top: 1.5rem;
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 0.875rem;
+      color: var(--text-sub);
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>Live Captions & Recorder</h1>
+    <p>Launch an always-on-top caption window while automatically recording audio.</p>
+
+    <button id="launchBtn" class="btn">Launch Overlay & Record</button>
+    <a id="downloadBtn" class="btn btn-download" style="display: none;" download="caption-recording.webm">Download Recording (.webm)</a>
+
+    <div id="statusBox" class="status-box">Ready to start.</div>
+  </div>
+
+  <script>
+    const launchBtn = document.getElementById('launchBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const statusBox = document.getElementById('statusBox');
+
+    let recognition = null;
+    let pipWindow = null;
+    let isPipActive = false;
+
+    // Recording variables
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let audioStream = null;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const hasPiP = 'documentPictureInPicture' in window;
+      const hasSpeech = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
+
+      if (!hasPiP || !hasSpeech) {
+        launchBtn.disabled = true;
+        statusBox.style.color = '#ef4444';
+        statusBox.textContent = 'Unsupported browser. Please use Chrome or Edge on desktop.';
+      }
+    });
+
+    launchBtn.addEventListener('click', async () => {
+      if (isPipActive && pipWindow) {
+        pipWindow.close();
+        return;
+      }
+
+      try {
+        statusBox.style.color = '#94a3b8';
+        statusBox.textContent = 'Requesting microphone & opening window...';
+        downloadBtn.style.display = 'none';
+
+        // 1. Capture Microphone Audio for Recording
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(audioStream);
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = () => {
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          const audioUrl = URL.createObjectURL(audioBlob);
+          downloadBtn.href = audioUrl;
+          downloadBtn.style.display = 'block';
+          
+          // Stop track streams to turn off red recording dot in browser tab
+          if (audioStream) {
+            audioStream.getTracks().forEach(track => track.stop());
+          }
+        };
+
+        // Start audio recording
+        mediaRecorder.start();
+
+        // 2. Open Picture-in-Picture window
+        pipWindow = await documentPictureInPicture.requestWindow({
+          width: 700,
+          height: 120,
+        });
+
+        isPipActive = true;
+        launchBtn.textContent = 'Stop & Save Recording';
+        launchBtn.style.backgroundColor = '#dc2626';
+
+        // 3. Build PiP Overlay UI
+        const pipDoc = pipWindow.document;
+        pipDoc.body.style.margin = '0';
+        pipDoc.body.style.background = '#0a0a0a';
+        pipDoc.body.style.display = 'flex';
+        pipDoc.body.style.alignItems = 'center';
+        pipDoc.body.style.justifyContent = 'center';
+        pipDoc.body.style.height = '100vh';
+        pipDoc.body.style.overflow = 'hidden';
+
+        const captionBox = pipDoc.createElement('div');
+        captionBox.style.cssText = `
+          width: 100%;
+          max-height: 2.6em;
+          padding: 0 20px;
+          box-sizing: border-box;
+          font-family: system-ui, -apple-system, sans-serif;
+          font-size: 32px;
+          font-weight: 700;
+          line-height: 1.3;
+          text-align: center;
+          color: #facc15;
+          text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+          overflow: hidden;
+          word-wrap: break-word;
+        `;
+        captionBox.textContent = 'Recording & Listening...';
+        pipDoc.body.appendChild(captionBox);
+
+        // 4. Initialize Speech Recognition
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event) => {
+          let transcript = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            transcript += event.results[i][0].transcript;
+          }
+          if (transcript.trim()) {
+            captionBox.textContent = transcript;
+            captionBox.scrollTop = captionBox.scrollHeight;
+          }
+        };
+
+        recognition.onend = () => {
+          if (isPipActive && pipWindow && !pipWindow.closed) {
+            try {
+              recognition.start();
+            } catch (e) {}
+          }
+        };
+
+        // Handle overlay closing
+        pipWindow.addEventListener('pagehide', () => {
+          isPipActive = false;
+          
+          if (recognition) {
+            recognition.stop();
+          }
+
+          if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+          }
+
+          launchBtn.textContent = 'Launch Overlay & Record';
+          launchBtn.style.backgroundColor = '#2563eb';
+          statusBox.textContent = 'Recording saved! Click below to download.';
+        });
+
+        recognition.start();
+        statusBox.textContent = 'Capturing captions & recording audio...';
+
+      } catch (err) {
+        isPipActive = false;
+        statusBox.style.color = '#ef4444';
+        statusBox.textContent = 'Launch failed: ' + err.message;
+      }
+    });
+  </script>
+</body>
+</html>
